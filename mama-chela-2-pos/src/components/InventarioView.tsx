@@ -72,8 +72,46 @@ export function InventarioView({
     cargarDatos()
   }, [cargarDatos])
 
+  const buscarEnCatalogoGlobal = async (codigo: string): Promise<string | null> => {
+    try {
+      // 1. Buscar en Open Food Facts (alimentos y bebidas)
+      const resFood = await fetch(
+        `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(codigo)}.json`
+      )
+      if (resFood.ok) {
+        const data = await resFood.json()
+        if (data.status === 1 && data.product) {
+          const p = data.product
+          const nombreBase = p.product_name_es || p.product_name || ''
+          const marca = p.brands ? p.brands.split(',')[0].trim() : ''
+          const cantidad = p.quantity || ''
+          const armado = [nombreBase, marca, cantidad].filter(Boolean).join(' - ')
+          if (armado.trim()) return armado.trim()
+        }
+      }
+
+      // 2. Respaldo en Open Products Facts (limpieza / uso general)
+      const resProd = await fetch(
+        `https://world.openproductsfacts.org/api/v2/product/${encodeURIComponent(codigo)}.json`
+      )
+      if (resProd.ok) {
+        const data = await resProd.json()
+        if (data.status === 1 && data.product) {
+          const p = data.product
+          const nombreBase = p.product_name_es || p.product_name || ''
+          const marca = p.brands ? p.brands.split(',')[0].trim() : ''
+          const armado = [nombreBase, marca].filter(Boolean).join(' - ')
+          if (armado.trim()) return armado.trim()
+        }
+      }
+    } catch {
+      // Si no hay conexión o falla el servicio externo, continúa sin bloquear
+    }
+    return null
+  }
+
   const manejarCodigoDetectado = useCallback(
-    (codigo: string) => {
+    async (codigo: string) => {
       const limpio = codigo.trim()
       if (!limpio) return
       setError(null)
@@ -87,14 +125,27 @@ export function InventarioView({
         setCantidadEntrada('')
         setNuevoCostoEntrada(String(encontrado.precio_costo))
         setMensaje(`Código ${limpio} encontrado: ${encontrado.nombre}`)
+        return
+      }
+
+      setMensaje(`Buscando código ${limpio} en catálogo global...`)
+      setForm({
+        ...formInicial,
+        codigo_barras: limpio,
+        categoria_id: categorias[0]?.id ?? '',
+      })
+      setModalAbierto(true)
+
+      const nombreSugerido = await buscarEnCatalogoGlobal(limpio)
+      if (nombreSugerido) {
+        setForm((prev) =>
+          prev.codigo_barras === limpio && !prev.nombre.trim()
+            ? { ...prev, nombre: nombreSugerido }
+            : prev
+        )
+        setMensaje(`¡Producto identificado! Revisa el nombre y pon precio y cantidad.`)
       } else {
-        setForm({
-          ...formInicial,
-          codigo_barras: limpio,
-          categoria_id: categorias[0]?.id ?? '',
-        })
-        setModalAbierto(true)
-        setMensaje(`Código ${limpio} nuevo: completa los datos para registrarlo.`)
+        setMensaje(`Código ${limpio} no está en el catálogo global. Escribe su nombre una sola vez.`)
       }
     },
     [productos, categorias]
